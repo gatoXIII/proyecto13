@@ -1,0 +1,37 @@
+# Directorio de dependencias de Node
+/node_modules
+
+# Directorios de compilación y artefactos generados por SvelteKit/Vite
+# Estas son salidas de 'npm run build' y 'npm run dev'
+/.svelte-kit
+/build
+/dist
+/package
+
+# Logs y Caché
+# Ficheros de log y caché de npm/yarn
+npm-debug.log*
+.npm
+.eslintcache
+.vite-node
+.vite-node-debugger
+
+# Archivos de entorno y claves secretas
+# Es crucial no subir nunca variables de entorno ni claves
+.env
+.env.*
+!.env.example # Permite incluir un ejemplo sin valores sensibles
+!/.env.development
+!/.env.production
+
+# Archivos de editor/IDE
+# Archivos de configuración o temporales de entornos de desarrollo populares
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.DS_Store # macOS
+Thumbs.db # Windows
+
+# Archivos temporales de TypeScript
+*.tsbuildinfo
