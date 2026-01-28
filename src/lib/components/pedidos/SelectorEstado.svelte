@@ -14,7 +14,6 @@
   let mostrarConfirmacion = false;
   let estadoSeleccionado = null;
   
-  // Obtener estados disponibles según transiciones permitidas
   $: estadosDisponibles = estadosPermitidos.map(estado => ({
     valor: estado,
     ...CONFIG_ESTADOS[estado]
@@ -30,31 +29,44 @@
   }
   
   async function confirmarCambio() {
-    if (!estadoSeleccionado) return;
-    
     cambiando = true;
     error = '';
     
     try {
-      const res = await fetch('/api/pedidos', {
-        method: 'PUT',
+      // ✅ CORRECCIÓN: Ruta correcta del endpoint
+      const res = await fetch(`/api/pedidos/${pedido.id}/cambiar-estado`, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id: pedido.id,
-          estado: estadoSeleccionado
+          estado: estadoSeleccionado,
+          notas: `Estado cambiado manualmente a ${estadoSeleccionado}`,
+          usuario: 'Admin'
         })
       });
       
       const result = await res.json();
       
-      if (!result.success) throw new Error(result.error);
+      if (!result.success) {
+        throw new Error(result.error || 'Error al cambiar estado');
+      }
       
-      dispatch('cambioEstado', result.data);
+      // ✅ Emitir evento con datos actualizados
+      dispatch('cambioEstado', {
+        pedidoId: pedido.id,
+        estadoAnterior: pedido.estado,
+        estadoNuevo: estadoSeleccionado,
+        pedidoActualizado: result.data
+      });
+      
+      // Actualizar pedido localmente
+      pedido = result.data;
+      
       mostrarConfirmacion = false;
       estadoSeleccionado = null;
       
     } catch (err) {
-      error = err.message;
+      console.error('❌ Error cambiando estado:', err);
+      error = err.message || 'Error al cambiar estado';
       setTimeout(() => error = '', 5000);
     } finally {
       cambiando = false;
