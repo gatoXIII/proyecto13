@@ -1,16 +1,38 @@
 // src/routes/api/pedidos/[id]/validar-pago/+server.js
+// ✅ VERSIÓN FINAL CORREGIDA
+
 import { json } from '@sveltejs/kit';
 import { supabaseAdmin } from '$lib/supabaseServer';
-import { ESTADOS, ESTADOS_PAGO, puedeValidarPago } from '$lib/server/pedidos/estados';
+import { 
+  ESTADOS, 
+  ESTADOS_PAGO, 
+  validarTransicionConContexto 
+} from '$lib/server/pedidos/estados';
+import { encolarNotificacion } from '$lib/server/notificaciones/cola';
 
 /**
  * POST - Validar comprobante de pago
- * Body: { aprobado: boolean, motivo_rechazo?: string, validado_por: string }
  */
 export async function POST({ params, request }) {
+  const { id } = params;
+  
   try {
-    const { id } = params;
     const { aprobado, motivo_rechazo, validado_por } = await request.json();
+    
+    // Validaciones iniciales
+    if (typeof aprobado !== 'boolean') {
+      return json(
+        { success: false, error: 'El campo "aprobado" es requerido y debe ser booleano' },
+        { status: 400 }
+      );
+    }
+    
+    if (!aprobado && (!motivo_rechazo || motivo_rechazo.trim().length < 10)) {
+      return json(
+        { success: false, error: 'Debes proporcionar un motivo de rechazo (mínimo 10 caracteres)' },
+        { status: 400 }
+      );
+    }
     
     // Obtener pedido
     const { data: pedido, error: errorPedido } = await supabaseAdmin
@@ -26,51 +48,87 @@ export async function POST({ params, request }) {
       );
     }
     
-    // Validar que se puede validar el pago
-    const validacion = puedeValidarPago(pedido);
-    if (!validacion.valido) {
+    // Validar precondiciones
+    if (!pedido.constancia_pago_url) {
       return json(
-        { success: false, error: validacion.mensaje },
+        { success: false, error: 'No hay comprobante de pago para validar' },
         { status: 400 }
       );
     }
     
-    let updateData = {};
-    let mensajeHistorial = '';
+    if (pedido.estado !== ESTADOS.CONFIRMADO) {
+      return json(
+        { success: false, error: `El pedido debe estar en estado CONFIRMADO (actual: ${pedido.estado})` },
+        { status: 400 }
+      );
+    }
+    
+    if (pedido.estado_pago === ESTADOS_PAGO.PAGADO) {
+      return json(
+        { success: false, error: 'El pago ya fue validado anteriormente' },
+        { status: 400 }
+      );
+    }
+    
+    // Preparar datos según decisión
+    let updateData;
+    let mensajeHistorial;
+    let tipoNotificacion;
     
     if (aprobado) {
       // ✅ PAGO APROBADO
+      const validacion = validarTransicionConContexto(pedido, ESTADOS.PAGADO);
+      if (!validacion.valido) {
+        return json(
+          { success: false, error: validacion.mensaje },
+          { status: 400 }
+        );
+      }
+      
       updateData = {
         estado: ESTADOS.PAGADO,
         estado_pago: ESTADOS_PAGO.PAGADO,
         esperando_validacion: false,
         fecha_pagado: new Date().toISOString(),
-        validado_por: validado_por || 'Vendedor',
-        editable: false // Bloquear edición
+        validado_por: validado_por || 'Admin',
+        editable: false,
+        motivo_rechazo_pago: null
       };
-      mensajeHistorial = 'Pago validado correctamente';
+      
+      mensajeHistorial = `Pago validado por ${validado_por || 'Admin'}`;
+      tipoNotificacion = 'pago_validado';
       
     } else {
-      // ❌ PAGO RECHAZADO
+      // ❌ PAGO RECHAZADO - MANTENER EN CONFIRMADO
       updateData = {
+        estado: ESTADOS.CONFIRMADO, // ✅ Mantener confirmado
         estado_pago: ESTADOS_PAGO.RECHAZADO,
         esperando_validacion: false,
-        motivo_rechazo_pago: motivo_rechazo || 'Comprobante no válido',
-        editable: true, // Reabrir edición para que cliente pueda corregir
-        constancia_pago_url: null // Limpiar comprobante rechazado
+        motivo_rechazo_pago: motivo_rechazo.trim(),
+        constancia_pago_url: null, // Limpiar comprobante rechazado
+        // ✅ NO LIMPIAR: costo_envio, fecha_confirmado, metodo_pago
+        editable: true // Permitir correcciones
       };
-      mensajeHistorial = `Pago rechazado: ${motivo_rechazo}`;
+      
+      mensajeHistorial = `Pago rechazado por ${validado_por || 'Admin'}: ${motivo_rechazo}`;
+      tipoNotificacion = 'pago_rechazado';
     }
     
     // Actualizar pedido
-    const { data: pedidoActualizado, error } = await supabaseAdmin
+    const { data: pedidoActualizado, error: errorUpdate } = await supabaseAdmin
       .from('pedidos')
       .update(updateData)
       .eq('id', id)
       .select()
       .single();
     
-    if (error) throw error;
+    if (errorUpdate) {
+      console.error('Error actualizando pedido:', errorUpdate);
+      return json(
+        { success: false, error: 'Error al actualizar el estado del pedido' },
+        { status: 500 }
+      );
+    }
     
     // Registrar en historial
     await supabaseAdmin
@@ -78,28 +136,52 @@ export async function POST({ params, request }) {
       .insert({
         pedido_id: id,
         estado_anterior: pedido.estado,
-        estado_nuevo: aprobado ? ESTADOS.PAGADO : pedido.estado,
+        estado_nuevo: updateData.estado,
         tipo_usuario: 'vendedor',
-        usuario_responsable: validado_por,
+        usuario_responsable: validado_por || 'Admin',
         notas: mensajeHistorial,
         metadata: {
           aprobado,
-          motivo_rechazo: motivo_rechazo || null
+          motivo_rechazo: aprobado ? null : motivo_rechazo,
+          comprobante_url: pedido.constancia_pago_url,
+          timestamp: new Date().toISOString()
         }
       });
+    
+    // Encolar notificación
+    try {
+      await encolarNotificacion({
+        pedidoId: id,
+        clienteWhatsapp: pedidoActualizado.cliente_whatsapp,
+        tipo: tipoNotificacion,
+        prioridad: 'alta',
+        metadata: aprobado ? {} : { motivo: motivo_rechazo }
+      });
+      
+      // 🔥 Procesar inmediatamente
+      const { procesarCola } = await import('$lib/server/notificaciones/cola');
+      await procesarCola();
+      
+      console.log(`✅ Notificación ${tipoNotificacion} enviada para pedido ${pedidoActualizado.numero_pedido}`);
+    } catch (notifError) {
+      console.error('⚠️ Error en notificación:', notifError);
+    }
+    
+    // Respuesta
+    const mensaje = aprobado 
+      ? '✅ Pago validado correctamente. El pedido pasó a estado PAGADO.'
+      : '❌ Pago rechazado. El cliente debe subir un nuevo comprobante.';
     
     return json({
       success: true,
       data: pedidoActualizado,
-      message: aprobado 
-        ? '✅ Pago validado. El pedido ahora está en preparación.' 
-        : '❌ Pago rechazado. El cliente debe subir un nuevo comprobante.'
+      message: mensaje
     });
     
   } catch (error) {
-    console.error('Error validando pago:', error);
+    console.error('Error en validación de pago:', error);
     return json(
-      { success: false, error: error.message },
+      { success: false, error: 'Error interno al validar el pago' },
       { status: 500 }
     );
   }

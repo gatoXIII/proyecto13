@@ -2,6 +2,7 @@
 import { json } from '@sveltejs/kit';
 import { supabaseAdmin } from '$lib/supabaseServer';
 import { ESTADOS, validarTransicion } from '$lib/server/pedidos/estados';
+import { encolarNotificacion } from '$lib/server/notificaciones/cola';
 
 /**
  * POST - Confirmar pedido (Vendedor valida stock y agrega costos)
@@ -35,21 +36,19 @@ export async function POST({ params, request }) {
     }
     
     // Datos a actualizar
+    const costoEnvio = parseFloat(body.costo_envio || 0);
+    const nuevoTotal = parseFloat(pedido.subtotal) + 
+                      parseFloat(pedido.impuesto || 0) + 
+                      costoEnvio;
+    
     const updateData = {
       estado: ESTADOS.CONFIRMADO,
       fecha_confirmado: new Date().toISOString(),
-      costo_envio: parseFloat(body.costo_envio || 0),
+      costo_envio: costoEnvio,
+      total: nuevoTotal,
       metodo_pago: body.metodo_pago || pedido.metodo_pago,
       notas: body.notas || pedido.notas
     };
-    
-    // Recalcular total si cambió el costo de envío
-    if (body.costo_envio !== undefined) {
-      const nuevoTotal = parseFloat(pedido.subtotal) + 
-                        parseFloat(pedido.impuesto || 0) + 
-                        parseFloat(body.costo_envio);
-      updateData.total = nuevoTotal;
-    }
     
     // Actualizar pedido
     const { data: pedidoActualizado, error } = await supabaseAdmin
@@ -59,7 +58,10 @@ export async function POST({ params, request }) {
       .select()
       .single();
     
-    if (error) throw error;
+    if (error) {
+      console.error('Error actualizando pedido:', error);
+      throw error;
+    }
     
     // Registrar en historial
     await supabaseAdmin
@@ -69,17 +71,56 @@ export async function POST({ params, request }) {
         estado_anterior: pedido.estado,
         estado_nuevo: ESTADOS.CONFIRMADO,
         tipo_usuario: 'vendedor',
-        notas: `Stock validado. Costo de envío: $${body.costo_envio || 0}`,
+        usuario_responsable: 'Admin',
+        notas: `Stock validado. Costo de envío: $${costoEnvio.toFixed(2)}, Total: $${nuevoTotal.toFixed(2)}`,
         metadata: {
-          costo_envio_agregado: body.costo_envio || 0,
-          metodo_pago: body.metodo_pago
+          costo_envio_agregado: costoEnvio,
+          metodo_pago: body.metodo_pago,
+          total: nuevoTotal
         }
       });
+    
+    // ✅ ENCOLAR NOTIFICACIÓN CON DATOS BANCARIOS
+    try {
+      // Obtener configuración para datos bancarios
+      const { data: config } = await supabaseAdmin
+        .from('configuracion')
+        .select('cuentas_pago')
+        .single();
+      
+      const cuentasPago = config?.cuentas_pago 
+        ? (typeof config.cuentas_pago === 'string' 
+            ? JSON.parse(config.cuentas_pago) 
+            : config.cuentas_pago)
+        : [];
+      
+      await encolarNotificacion({
+        pedidoId: id,
+        clienteWhatsapp: pedido.cliente_whatsapp,
+        tipo: 'pedido_confirmado',
+        prioridad: 'alta',
+        metadata: {
+          metodo_pago: body.metodo_pago,
+          costo_envio: costoEnvio,
+          total: nuevoTotal,
+          cuentas_pago: cuentasPago // ✅ CRÍTICO
+        }
+      });
+      
+      // 🔥 Procesar la cola inmediatamente
+      const { procesarCola } = await import('$lib/server/notificaciones/cola');
+      await procesarCola();
+      
+      console.log(`✅ Notificación de confirmación enviada para pedido ${pedidoActualizado.numero_pedido}`);
+    } catch (notifError) {
+      console.error('⚠️ Error en notificación:', notifError);
+      // No fallar el proceso principal
+    }
     
     return json({
       success: true,
       data: pedidoActualizado,
-      message: 'Pedido confirmado exitosamente'
+      message: 'Pedido confirmado. Se envió mensaje al cliente con datos de pago.'
     });
     
   } catch (error) {
