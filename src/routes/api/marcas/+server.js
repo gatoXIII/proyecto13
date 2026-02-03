@@ -5,16 +5,22 @@ import { supabase } from '$lib/supabaseClient';
 import { supabaseAdmin } from '$lib/supabaseServer';
 
 // ========================================
-// GET - Listar marcas (puede usar cliente público)
+// GET - Listar marcas
 // ========================================
 export async function GET({ url }) {
   try {
     const activas = url.searchParams.get('activas');
+    const incluirEliminadas = url.searchParams.get('incluir_eliminadas');
     
     let query = supabase
       .from('marcas')
       .select('*')
       .order('nombre', { ascending: true });
+    
+    // Por defecto, filtrar eliminadas
+    if (incluirEliminadas !== 'true') {
+      query = query.eq('eliminado', false);
+    }
     
     if (activas === 'true') {
       query = query.eq('activo', true);
@@ -39,13 +45,11 @@ export async function GET({ url }) {
 
 // ========================================
 // POST - Crear marca
-// ✅ CORRECCIÓN: Usar supabaseAdmin
 // ========================================
 export async function POST({ request }) {
   try {
     const body = await request.json();
     
-    // Validaciones
     if (!body.nombre?.trim()) {
       return json(
         { success: false, error: 'El nombre es obligatorio' },
@@ -57,12 +61,12 @@ export async function POST({ request }) {
       nombre: body.nombre.trim(),
       descripcion: body.descripcion?.trim() || null,
       logo_url: body.logo_url?.trim() || null,
-      activo: body.activo !== false
+      activo: body.activo !== false,
+      eliminado: false
     };
     
     console.log('📤 Creando marca con supabaseAdmin:', marcaData);
     
-    // ✅ CORRECCIÓN: Usar supabaseAdmin en lugar de supabase
     const { data, error } = await supabaseAdmin
       .from('marcas')
       .insert([marcaData])
@@ -99,7 +103,6 @@ export async function POST({ request }) {
 
 // ========================================
 // PUT - Actualizar marca
-// ✅ CORRECCIÓN: Usar supabaseAdmin
 // ========================================
 export async function PUT({ request }) {
   try {
@@ -121,14 +124,12 @@ export async function PUT({ request }) {
       }
     });
     
-    // Si se actualiza el nombre, trim
     if (updateData.nombre) {
       updateData.nombre = updateData.nombre.trim();
     }
     
     console.log('📤 Actualizando marca con supabaseAdmin:', updateData);
     
-    // ✅ CORRECCIÓN: Usar supabaseAdmin en lugar de supabase
     const { data, error } = await supabaseAdmin
       .from('marcas')
       .update(updateData)
@@ -156,8 +157,7 @@ export async function PUT({ request }) {
 }
 
 // ========================================
-// DELETE - Eliminar marca
-// ✅ CORRECCIÓN: Usar supabaseAdmin
+// DELETE - Soft delete de marca
 // ========================================
 export async function DELETE({ url }) {
   try {
@@ -170,38 +170,39 @@ export async function DELETE({ url }) {
       );
     }
     
-    // Verificar si hay productos usando esta marca (puede usar cliente público para lectura)
+    // Verificar si hay productos usando esta marca
     const { data: productosConMarca, error: errorCheck } = await supabase
       .from('productos')
       .select('id')
       .eq('marca_id', id)
+      .eq('eliminado', false)
       .limit(1);
     
     if (errorCheck) throw errorCheck;
     
-    if (productosConMarca && productosConMarca.length > 0) {
-      return json(
-        { 
-          success: false, 
-          error: 'No se puede eliminar. Hay productos usando esta marca. Primero elimina o reasigna los productos.' 
-        },
-        { status: 409 }
-      );
-    }
+    const tieneProductos = productosConMarca && productosConMarca.length > 0;
     
-    // ✅ CORRECCIÓN: Usar supabaseAdmin para eliminar
-    const { error } = await supabaseAdmin
+    // Soft delete
+    const { data, error } = await supabaseAdmin
       .from('marcas')
-      .delete()
-      .eq('id', id);
+      .update({ 
+        eliminado: true,
+        fecha_eliminacion: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select()
+      .single();
     
     if (error) throw error;
     
-    console.log('✅ Marca eliminada:', id);
+    console.log('✅ Marca archivada:', id);
     
     return json({
       success: true,
-      message: 'Marca eliminada exitosamente'
+      data,
+      message: tieneProductos 
+        ? 'Marca archivada. Seguirá disponible en el historial de productos.'
+        : 'Marca eliminada exitosamente'
     });
     
   } catch (error) {

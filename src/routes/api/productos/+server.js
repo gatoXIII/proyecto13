@@ -1,7 +1,7 @@
 // src/routes/api/productos/+server.js
 import { json } from '@sveltejs/kit';
 import { supabase } from '$lib/supabaseClient';
-import { supabaseAdmin } from '$lib/supabaseServer'; // ✅ IMPORTAR ADMIN
+import { supabaseAdmin } from '$lib/supabaseServer';
 
 function generateSlug(nombre) {
   return nombre
@@ -17,11 +17,11 @@ async function ensureUniqueSlug(baseSlug, excludeId = null) {
   let counter = 1;
   
   while (true) {
-    // ✅ Usar cliente público para lectura (más rápido y no consume service_role)
     const query = supabase
       .from('productos')
       .select('id')
-      .eq('slug', slug);
+      .eq('slug', slug)
+      .eq('eliminado', false);
     
     if (excludeId) {
       query.neq('id', excludeId);
@@ -43,11 +43,14 @@ async function ensureUniqueSlug(baseSlug, excludeId = null) {
   }
 }
 
-// ✅ GET puede usar cliente público (solo lectura)
+// ========================================
+// GET - Listar productos
+// ========================================
 export async function GET({ url }) {
   try {
     const destacado = url.searchParams.get('destacado');
     const categoria_id = url.searchParams.get('categoria_id');
+    const incluirEliminados = url.searchParams.get('incluir_eliminados');
     
     let query = supabase
       .from('productos')
@@ -56,6 +59,11 @@ export async function GET({ url }) {
         categoria:categorias(id, nombre, slug)
       `)
       .order('created_at', { ascending: false });
+    
+    // Por defecto, filtrar eliminados
+    if (incluirEliminados !== 'true') {
+      query = query.eq('eliminado', false);
+    }
     
     if (destacado === 'true') {
       query = query.eq('destacado', true);
@@ -76,7 +84,9 @@ export async function GET({ url }) {
   }
 }
 
-// ✅ POST debe usar supabaseAdmin
+// ========================================
+// POST - Crear producto
+// ========================================
 export async function POST({ request }) {
   try {
     const body = await request.json();
@@ -118,12 +128,12 @@ export async function POST({ request }) {
       activo: body.activo !== false,
       slug,
       precio_oferta,
-      sku: body.sku?.trim() || null
+      sku: body.sku?.trim() || null,
+      eliminado: false
     };
     
     console.log('💾 Insertando producto con supabaseAdmin:', productoData);
     
-    // ✅ CORRECCIÓN: Usar supabaseAdmin en lugar de supabase
     const { data, error } = await supabaseAdmin
       .from('productos')
       .insert([productoData])
@@ -155,7 +165,9 @@ export async function POST({ request }) {
   }
 }
 
-// ✅ PUT debe usar supabaseAdmin
+// ========================================
+// PUT - Actualizar producto
+// ========================================
 export async function PUT({ request }) {
   try {
     const body = await request.json();
@@ -184,7 +196,6 @@ export async function PUT({ request }) {
     
     console.log('📤 Actualizando producto con supabaseAdmin:', id, updateData);
     
-    // ✅ CORRECCIÓN: Usar supabaseAdmin
     const { data, error } = await supabaseAdmin
       .from('productos')
       .update(updateData)
@@ -205,7 +216,9 @@ export async function PUT({ request }) {
   }
 }
 
-// ✅ DELETE debe usar supabaseAdmin
+// ========================================
+// DELETE - Soft delete de producto
+// ========================================
 export async function DELETE({ url }) {
   try {
     const id = url.searchParams.get('id');
@@ -214,18 +227,36 @@ export async function DELETE({ url }) {
       return json({ error: 'ID del producto requerido' }, { status: 400 });
     }
     
-    console.log('🗑️ Eliminando producto con supabaseAdmin:', id);
+    // Verificar si está en pedidos
+    const { data: pedidosAsociados } = await supabaseAdmin
+      .from('pedidos_items')
+      .select('id')
+      .eq('producto_id', id)
+      .limit(1);
     
-    // ✅ CORRECCIÓN: Usar supabaseAdmin
+    const tieneEnPedidos = pedidosAsociados && pedidosAsociados.length > 0;
+    
+    console.log('🗑️ Archivando producto (soft delete):', id);
+    
+    // Soft delete
     const { error } = await supabaseAdmin
       .from('productos')
-      .delete()
+      .update({ 
+        eliminado: true,
+        fecha_eliminacion: new Date().toISOString()
+      })
       .eq('id', id);
     
     if (error) throw error;
     
-    console.log('✅ Producto eliminado:', id);
-    return json({ success: true });
+    console.log('✅ Producto archivado:', id);
+    
+    return json({ 
+      success: true,
+      message: tieneEnPedidos 
+        ? 'Producto archivado. Seguirá disponible en el historial de pedidos.'
+        : 'Producto eliminado exitosamente'
+    });
   } catch (error) {
     console.error('❌ Error en DELETE /api/productos:', error);
     return json({ error: error.message }, { status: 500 });

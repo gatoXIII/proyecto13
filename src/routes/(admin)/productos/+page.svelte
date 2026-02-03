@@ -17,7 +17,7 @@
   let filterActivo = '';
   
   // Vista (grid o table)
-  let viewMode = 'table'; // 'table' o 'grid'
+  let viewMode = 'table';
   
   // Producto a eliminar
   let productoToDelete = null;
@@ -30,9 +30,8 @@
   async function loadData() {
     try {
       loading = true;
-      error = ''; // Limpiar errores previos
+      error = '';
       
-      // ✅ CORRECCIÓN: Rutas API con slash inicial
       const [resProductos, resCategorias] = await Promise.all([
         fetch('/api/productos'),
         fetch('/api/categorias')
@@ -93,11 +92,15 @@
         method: 'DELETE'
       });
       
-      if (!res.ok) throw new Error('Error al eliminar');
+      const result = await res.json();
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Error al eliminar');
+      }
       
       await loadData();
-      success = 'Producto eliminado correctamente';
-      setTimeout(() => success = '', 3000);
+      success = result.message || 'Producto eliminado correctamente';
+      setTimeout(() => success = '', 5000);
       
     } catch (err) {
       error = err.message;
@@ -133,7 +136,7 @@
     }
     
     if (filterCategoria) {
-      matches = matches && p.categoria_id === parseInt(filterCategoria);
+      matches = matches && p.categoria_id === filterCategoria;
     }
     
     if (filterDestacado !== '') {
@@ -459,7 +462,7 @@
 </div>
 
 <!-- Modal de confirmación de eliminación -->
-{#if showDeleteModal}
+{#if showDeleteModal && productoToDelete}
   <div class="fixed inset-0 z-50 overflow-y-auto">
     <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
       <!-- Backdrop -->
@@ -482,10 +485,14 @@
                 Eliminar Producto
               </h3>
               <div class="mt-2">
-                <p class="text-sm text-gray-500">
-                  ¿Estás seguro de que deseas eliminar <strong>{productoToDelete?.nombre}</strong>? 
-                  Esta acción no se puede deshacer.
+                <p class="text-sm text-gray-500 mb-3">
+                  ¿Estás seguro de que deseas eliminar <strong>{productoToDelete.nombre}</strong>?
                 </p>
+                <div class="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <p class="text-sm text-blue-800">
+                    ℹ️ El producto seguirá disponible en el historial de pedidos que lo tienen.
+                  </p>
+                </div>
               </div>
             </div>
           </div>

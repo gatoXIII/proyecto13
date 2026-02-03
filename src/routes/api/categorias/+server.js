@@ -1,5 +1,4 @@
 // src/routes/api/categorias/+server.js
-//x
 import { json } from '@sveltejs/kit';
 import { supabaseAdmin } from '$lib/supabaseServer';
 import { generateSlug } from '$lib/supabaseClient';
@@ -10,11 +9,17 @@ import { generateSlug } from '$lib/supabaseClient';
 export async function GET({ url }) {
   try {
     const activas = url.searchParams.get('activas');
+    const incluirEliminadas = url.searchParams.get('incluir_eliminadas');
     
     let query = supabaseAdmin
       .from('categorias')
       .select('*')
       .order('orden', { ascending: true });
+    
+    // Por defecto, filtrar eliminadas
+    if (incluirEliminadas !== 'true') {
+      query = query.eq('eliminado', false);
+    }
     
     if (activas === 'true') {
       query = query.eq('activo', true);
@@ -54,11 +59,12 @@ export async function POST({ request }) {
     // Generar slug único
     let slug = body.slug || generateSlug(body.nombre);
     
-    // Verificar slug único
+    // Verificar slug único (solo entre no eliminadas)
     const { data: existingSlug } = await supabaseAdmin
       .from('categorias')
       .select('slug')
       .eq('slug', slug)
+      .eq('eliminado', false)
       .single();
     
     if (existingSlug) {
@@ -70,7 +76,8 @@ export async function POST({ request }) {
       descripcion: body.descripcion || null,
       slug,
       orden: body.orden || 0,
-      activo: body.activo !== undefined ? body.activo : true
+      activo: body.activo !== undefined ? body.activo : true,
+      eliminado: false
     };
     
     const { data, error } = await supabaseAdmin
@@ -144,7 +151,7 @@ export async function PUT({ request }) {
 }
 
 // ========================================
-// DELETE - Eliminar categoría
+// DELETE - Soft delete de categoría
 // ========================================
 export async function DELETE({ url }) {
   try {
@@ -157,10 +164,23 @@ export async function DELETE({ url }) {
       );
     }
     
+    // Verificar si tiene productos asociados
+    const { data: productosAsociados } = await supabaseAdmin
+      .from('productos')
+      .select('id')
+      .eq('categoria_id', id)
+      .eq('eliminado', false)
+      .limit(1);
+    
+    const tieneProductos = productosAsociados && productosAsociados.length > 0;
+    
     // Soft delete
     const { data, error } = await supabaseAdmin
       .from('categorias')
-      .update({ activo: false })
+      .update({ 
+        eliminado: true,
+        fecha_eliminacion: new Date().toISOString()
+      })
       .eq('id', id)
       .select()
       .single();
@@ -170,7 +190,9 @@ export async function DELETE({ url }) {
     return json({
       success: true,
       data,
-      message: 'Categoría eliminada exitosamente'
+      message: tieneProductos 
+        ? 'Categoría archivada. Seguirá disponible en el historial de pedidos.'
+        : 'Categoría eliminada exitosamente'
     });
     
   } catch (error) {

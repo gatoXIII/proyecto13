@@ -9,6 +9,8 @@
   let mostrarFormulario = false;
   let marcaEditando = null;
   let mensaje = { tipo: '', texto: '', visible: false };
+  let mostrarModalEliminar = false;
+  let marcaAEliminar = null;
   
   // Filtros
   let searchTerm = '';
@@ -55,11 +57,16 @@
     mostrarMensaje('success', marcaEditando ? 'Marca actualizada' : 'Marca creada');
   }
   
-  async function eliminarMarca(marca) {
-    if (!confirm(`¿Eliminar "${marca.nombre}"?\n\nSi hay productos usando esta marca, no se podrá eliminar.`)) return;
+  function confirmarEliminar(marca) {
+    marcaAEliminar = marca;
+    mostrarModalEliminar = true;
+  }
+  
+  async function eliminarMarca() {
+    if (!marcaAEliminar) return;
     
     try {
-      const response = await fetch(`/api/marcas?id=${marca.id}`, {
+      const response = await fetch(`/api/marcas?id=${marcaAEliminar.id}`, {
         method: 'DELETE'
       });
       
@@ -70,10 +77,13 @@
       }
       
       await cargarMarcas();
-      mostrarMensaje('success', 'Marca eliminada');
+      mostrarMensaje('success', result.message);
       
     } catch (error) {
       mostrarMensaje('error', error.message);
+    } finally {
+      mostrarModalEliminar = false;
+      marcaAEliminar = null;
     }
   }
   
@@ -286,7 +296,7 @@
                   <Edit class="w-4 h-4" />
                 </button>
                 <button
-                  on:click={() => eliminarMarca(marca)}
+                  on:click={() => confirmarEliminar(marca)}
                   class="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                   title="Eliminar"
                 >
@@ -300,6 +310,61 @@
     </div>
   {/if}
 </div>
+
+<!-- Modal de confirmación de eliminación -->
+{#if mostrarModalEliminar && marcaAEliminar}
+  <div class="fixed inset-0 z-50 overflow-y-auto">
+    <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+      <!-- Backdrop -->
+      <div 
+        class="fixed inset-0 transition-opacity bg-gray-500 bg-opacity-75"
+        on:click={() => mostrarModalEliminar = false}
+      ></div>
+
+      <!-- Modal -->
+      <div class="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+        <div class="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+          <div class="sm:flex sm:items-start">
+            <div class="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-red-100 sm:mx-0 sm:h-10 sm:w-10">
+              <svg class="h-6 w-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+              </svg>
+            </div>
+            <div class="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
+              <h3 class="text-lg leading-6 font-medium text-gray-900">
+                Eliminar Marca
+              </h3>
+              <div class="mt-2">
+                <p class="text-sm text-gray-500 mb-3">
+                  ¿Estás seguro de que deseas eliminar <strong>{marcaAEliminar.nombre}</strong>?
+                </p>
+                <div class="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <p class="text-sm text-blue-800">
+                    ℹ️ La marca seguirá disponible en el historial de productos que la utilizan.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse gap-2">
+          <button
+            on:click={eliminarMarca}
+            class="w-full inline-flex justify-center rounded-lg border border-transparent shadow-sm px-4 py-2 bg-red-600 text-base font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 sm:ml-3 sm:w-auto sm:text-sm"
+          >
+            Eliminar
+          </button>
+          <button
+            on:click={() => mostrarModalEliminar = false}
+            class="mt-3 w-full inline-flex justify-center rounded-lg border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:w-auto sm:text-sm"
+          >
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   @keyframes slide-in {

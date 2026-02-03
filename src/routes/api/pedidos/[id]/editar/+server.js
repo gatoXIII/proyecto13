@@ -74,6 +74,12 @@ export async function PUT({ params, request }) {
           : `Estado actual: ${pedido.estado}`
       }, { status: 400 });
     }
+    
+    // Cuando el cliente edita productos o costos después de un rechazo
+      if (pedido.estado_pago === 'rechazado') {
+        updateData.estado_pago = 'sin_pago'; // ✅ Resetear a sin_pago
+        updateData.motivo_rechazo_pago = null; // ✅ Limpiar motivo de rechazo
+      }
 
     // 3. Validar datos si se envían
     if (body.cliente_nombre || body.cliente_whatsapp || body.cliente_email) {

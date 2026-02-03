@@ -4,15 +4,11 @@ import { supabaseAdmin } from '$lib/supabaseServer';
 import { ESTADOS, validarTransicion } from '$lib/server/pedidos/estados';
 import { encolarNotificacion } from '$lib/server/notificaciones/cola';
 
-/**
- * POST - Confirmar pedido (Vendedor valida stock y agrega costos)
- */
 export async function POST({ params, request }) {
   try {
     const { id } = params;
     const body = await request.json();
     
-    // Obtener pedido actual
     const { data: pedido, error: errorPedido } = await supabaseAdmin
       .from('pedidos')
       .select('*')
@@ -26,7 +22,6 @@ export async function POST({ params, request }) {
       );
     }
     
-    // Validar transición
     const validacion = validarTransicion(pedido.estado, ESTADOS.CONFIRMADO);
     if (!validacion.valido) {
       return json(
@@ -35,7 +30,6 @@ export async function POST({ params, request }) {
       );
     }
     
-    // Datos a actualizar
     const costoEnvio = parseFloat(body.costo_envio || 0);
     const nuevoTotal = parseFloat(pedido.subtotal) + 
                       parseFloat(pedido.impuesto || 0) + 
@@ -50,7 +44,6 @@ export async function POST({ params, request }) {
       notas: body.notas || pedido.notas
     };
     
-    // Actualizar pedido
     const { data: pedidoActualizado, error } = await supabaseAdmin
       .from('pedidos')
       .update(updateData)
@@ -63,7 +56,6 @@ export async function POST({ params, request }) {
       throw error;
     }
     
-    // Registrar en historial
     await supabaseAdmin
       .from('pedidos_historial')
       .insert({
@@ -80,9 +72,10 @@ export async function POST({ params, request }) {
         }
       });
     
-    // ✅ ENCOLAR NOTIFICACIÓN CON DATOS BANCARIOS
+    // ✅ NOTIFICACIÓN CORREGIDA
     try {
-      // Obtener configuración para datos bancarios
+      console.log('📲 Encolando notificación de confirmación...');
+      
       const { data: config } = await supabaseAdmin
         .from('configuracion')
         .select('cuentas_pago')
@@ -103,18 +96,19 @@ export async function POST({ params, request }) {
           metodo_pago: body.metodo_pago,
           costo_envio: costoEnvio,
           total: nuevoTotal,
-          cuentas_pago: cuentasPago // ✅ CRÍTICO
+          cuentas_pago: cuentasPago
         }
       });
       
-      // 🔥 Procesar la cola inmediatamente
+      console.log('✅ Notificación encolada');
+      
+      // ✅ PROCESAR INMEDIATAMENTE
       const { procesarCola } = await import('$lib/server/notificaciones/cola');
       await procesarCola();
       
-      console.log(`✅ Notificación de confirmación enviada para pedido ${pedidoActualizado.numero_pedido}`);
+      console.log(`✅ Notificación procesada para pedido ${pedidoActualizado.numero_pedido}`);
     } catch (notifError) {
       console.error('⚠️ Error en notificación:', notifError);
-      // No fallar el proceso principal
     }
     
     return json({

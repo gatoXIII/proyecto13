@@ -1,8 +1,8 @@
 <!-- src/routes/(admin)/pedidos/+page.svelte -->
-<!-- ✅ VERSIÓN CORREGIDA -->
+<!-- ✅ VERSIÓN CORREGIDA - Estructura de tabla arreglada -->
 <script>
   import { onMount } from 'svelte';
-  import { Bell, Search, Eye, MessageCircle, CheckCircle, XCircle, Edit } from 'lucide-svelte';
+  import { Bell, Search, Eye, MessageCircle, CheckCircle, XCircle, Edit, Truck } from 'lucide-svelte';
   import { ESTADOS, CONFIG_ESTADOS, obtenerColorEstado } from '$lib/pedidos/estadosCliente';
   import ModalValidarPago from '$lib/components/pedidos/ModalValidarPago.svelte';
   import ModalCancelar from '$lib/components/pedidos/ModalCancelar.svelte';
@@ -10,6 +10,7 @@
   import ModalDetalles from '$lib/components/pedidos/ModalDetalles.svelte';
   import ModalEditarPedido from '$lib/components/pedidos/ModalEditarPedido.svelte';
   import BadgePendientes from '$lib/components/pedidos/BadgePendientes.svelte';
+  import ModalGuiaEnvio from '$lib/components/pedidos/ModalGuiaEnvio.svelte';
   
   let pedidos = [];
   let loading = true;
@@ -28,6 +29,7 @@
   let modalEnviar = { open: false, pedido: null };
   let modalDetalles = { open: false, pedido: null };
   let modalEditar = { open: false, pedido: null };
+  let modalGuiaEnvio = { open: false, pedido: null };
   
   // ✅ MEJORADO: Estados para UI
   const estados = Object.keys(ESTADOS).map(key => ({
@@ -112,6 +114,10 @@
     modalDetalles = { open: true, pedido };
   }
   
+  function abrirModalGuiaEnvio(pedido) {
+    modalGuiaEnvio = { open: true, pedido };
+  }
+
   function formatCurrency(amount) {
     return new Intl.NumberFormat('es-MX', {
       style: 'currency',
@@ -290,18 +296,22 @@
                     {CONFIG_ESTADOS[pedido.estado]?.icon} {CONFIG_ESTADOS[pedido.estado]?.label}
                   </span>
                 </td>
-                <td class="px-6 py-4 whitespace-nowrap">
-                  {#if pedido.esperando_validacion}
-                    <span class="px-3 py-1 text-xs font-semibold rounded-full bg-amber-100 text-amber-800 border border-amber-200 flex items-center gap-1 animate-pulse">
-                      <Bell class="w-3 h-3" />
-                      Validar
-                    </span>
-                  {:else if pedido.estado_pago === 'pagado'}
-                    <span class="text-xs text-green-600 font-medium">✓ Pagado</span>
-                  {:else}
-                    <span class="text-xs text-gray-400">-</span>
-                  {/if}
-                </td>
+                  <td class="px-6 py-4 whitespace-nowrap">
+                    {#if pedido.esperando_validacion}
+                      <span class="px-3 py-1 text-xs font-semibold rounded-full bg-amber-100 text-amber-800 border border-amber-200 flex items-center gap-1 animate-pulse">
+                        <Bell class="w-3 h-3" />
+                        Validar
+                      </span>
+                    {:else if pedido.estado_pago === 'rechazado'}
+                      <span class="px-3 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800 border border-red-200 flex items-center gap-1">
+                        ❌ Rechazado
+                      </span>
+                    {:else if pedido.estado_pago === 'pagado'}
+                      <span class="text-xs text-green-600 font-medium">✓ Pagado</span>
+                    {:else}
+                      <span class="text-xs text-gray-400">-</span>
+                    {/if}
+                  </td>
                 <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                   <div class="flex items-center justify-end gap-2">
                     {#if pedido.esperando_validacion}
@@ -311,6 +321,16 @@
                         title="Validar pago"
                       >
                         <CheckCircle class="w-5 h-5" />
+                      </button>
+                    {/if}
+                    
+                    {#if pedido.estado === 'preparando'}
+                      <button
+                        on:click={() => abrirModalGuiaEnvio(pedido)}
+                        class="p-2 text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100"
+                        title="Marcar como enviado"
+                      >
+                        <Truck class="w-5 h-5" />
                       </button>
                     {/if}
                     
@@ -358,6 +378,16 @@
     on:validated={() => loadPedidos()}
     on:close={() => { 
       modalValidarPago.open = false; 
+      loadPedidos(); 
+    }}
+  />
+{/if}
+
+{#if modalGuiaEnvio.open}
+  <ModalGuiaEnvio
+    pedido={modalGuiaEnvio.pedido}
+    on:close={() => { 
+      modalGuiaEnvio.open = false; 
       loadPedidos(); 
     }}
   />
