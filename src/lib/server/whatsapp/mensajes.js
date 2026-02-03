@@ -5,8 +5,14 @@ import { ESTADOS } from '$lib/pedidos/estadosCliente';
  * Genera mensaje de WhatsApp según el tipo
  */
 export function generarMensajeWhatsApp(pedido, tipo, config, metadata = {}) {
+  const telefonoDestino = pedido.cliente_whatsapp;
   const telefonoEmisor = config.whatsapp_negocio || config.whatsapp || '';
   const nombreNegocio = config.nombre_negocio || 'CatálogoExpress';
+
+  if (!telefonoDestino) {
+    console.error('❌ WhatsApp del cliente no disponible');
+    return null;
+  }
   
   const generadores = {
     'pedido_recibido': () => generarMensajePedidoRecibido(pedido, nombreNegocio),
@@ -26,9 +32,9 @@ export function generarMensajeWhatsApp(pedido, tipo, config, metadata = {}) {
   }
 
   const mensaje = generador();
-  const url = `https://wa.me/${telefonoEmisor}?text=${encodeURIComponent(mensaje)}`;
+  const url = `https://wa.me/${telefonoDestino}?text=${encodeURIComponent(mensaje)}`;
 
-  return { mensaje, url, telefono: telefonoEmisor };
+  return { mensaje, url, telefono: telefonoDestino };
 }
 
 // ========================================
@@ -84,6 +90,7 @@ Tu pedido #${pedido.numero_pedido} ha sido confirmado.
 1. Realiza el pago
 2. Toma captura del comprobante
 3. Súbelo desde tu área de pedidos
+⚠️ No olvides agregar los datos de destino del pedido para procesar el envío.
 
 ${nombreNegocio}`;
 

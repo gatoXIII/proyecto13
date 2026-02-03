@@ -51,7 +51,7 @@
         
         body.guia_envio = {
           paqueteria: guiaEnvio.paqueteria,
-          numero: guiaEnvio.numero_guia || null,
+          numero_guia: guiaEnvio.numero_guia || null,
           url_rastreo: guiaEnvio.url_rastreo || null,
           fecha_estimada: guiaEnvio.fecha_estimada || null,
           notas: guiaEnvio.notas || null
